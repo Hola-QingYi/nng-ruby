@@ -1,0 +1,43 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ruby: ['2.7', '3.0', '3.1', '3.2', '3.3']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Install dependencies
+        run: bundle install
+
+      - name: Run tests
+        run: bundle exec rspec
+
+      - name: Build gem
+        run: gem build nng.gemspec
+
+      - name: Verify gem contents
+        run: |
+          gem unpack nng-ruby-*.gem
+          ls -la nng-ruby-*/ext/nng/
+          if [ ! -f nng-ruby-*/ext/nng/libnng.so.1.8.0 ]; then
+            echo "Error: libnng.so.1.8.0 not found in gem"
+            exit 1
+          fi
+          echo "✓ libnng.so.1.8.0 found in gem"
