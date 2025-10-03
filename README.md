@@ -150,6 +150,75 @@ pull.close
 
 ## Advanced Usage
 
+### Custom Library Configuration
+
+By default, nng-ruby uses the bundled libnng.so.1.8.0 library. However, you can specify a custom NNG library in several ways:
+
+#### Option 1: At install time
+
+Use gem install options to specify a custom NNG library location:
+
+```bash
+# Specify NNG installation directory (will search lib/, lib64/, etc.)
+gem install nng-ruby -- --with-nng-dir=/opt/nng
+
+# Specify exact library path
+gem install nng-ruby -- --with-nng-lib=/opt/nng/lib/libnng.so
+
+# Specify include directory (for future use)
+gem install nng-ruby -- --with-nng-include=/opt/nng/include
+```
+
+#### Option 2: At runtime with environment variables
+
+Set environment variables before requiring the gem:
+
+```bash
+# Specify exact library file path
+export NNG_LIB_PATH=/usr/local/lib/libnng.so.1.9.0
+ruby your_script.rb
+
+# Or specify library directory (will search for libnng.so*)
+export NNG_LIB_DIR=/usr/local/lib
+ruby your_script.rb
+```
+
+In Ruby code:
+
+```ruby
+# Set before requiring nng
+ENV['NNG_LIB_PATH'] = '/custom/path/libnng.so'
+require 'nng'
+
+# Or use directory
+ENV['NNG_LIB_DIR'] = '/custom/path/lib'
+require 'nng'
+```
+
+#### Priority Order
+
+The library is loaded in this priority order:
+
+1. **Environment variable** `NNG_LIB_PATH` (highest priority)
+2. **Environment variable** `NNG_LIB_DIR`
+3. **Install-time configuration** (gem install --with-nng-*)
+4. **Bundled library** (ext/nng/libnng.so.1.8.0)
+5. **System paths** (/usr/local/lib, /usr/lib, etc.)
+
+#### Debugging
+
+Enable debug output to see which library is being loaded:
+
+```bash
+export NNG_DEBUG=1
+ruby your_script.rb
+```
+
+This will print messages showing:
+- Which paths are being searched
+- Which library was successfully loaded
+- Any load failures encountered
+
 ### Setting Timeouts
 
 ```ruby

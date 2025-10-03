@@ -7,31 +7,100 @@ module NNG
   module FFI
     extend ::FFI::Library
 
-    # Try to load libnng from various locations
-    @lib_paths = [
-      File.expand_path('../../ext/nng/libnng.so.1.8.0', __dir__),
-      '/usr/local/lib/libnng.so',
-      '/usr/lib/libnng.so',
-      '/usr/lib/x86_64-linux-gnu/libnng.so'
-    ]
+    # Load install-time configuration if available
+    @install_config = {}
+    config_file = File.expand_path('../../ext/nng/nng_config.rb', __dir__)
+    if File.exist?(config_file)
+      require config_file
+      @install_config = NNG::InstallConfig::CONFIG rescue {}
+    end
 
+    # Build library search paths with priority order:
+    # 1. ENV['NNG_LIB_PATH'] - Direct path to library file
+    # 2. ENV['NNG_LIB_DIR'] - Directory containing libnng.so*
+    # 3. Install config (from gem install --with-nng-*)
+    # 4. Bundled library
+    # 5. System default paths
+    def self.build_lib_paths
+      paths = []
+
+      # Priority 1: Direct library path from environment
+      if ENV['NNG_LIB_PATH'] && !ENV['NNG_LIB_PATH'].empty?
+        paths << ENV['NNG_LIB_PATH']
+        puts "NNG: Using library from NNG_LIB_PATH: #{ENV['NNG_LIB_PATH']}" if ENV['NNG_DEBUG']
+      end
+
+      # Priority 2: Library directory from environment
+      if ENV['NNG_LIB_DIR'] && !ENV['NNG_LIB_DIR'].empty?
+        dir = ENV['NNG_LIB_DIR']
+        # Search for libnng.so* in the directory
+        Dir.glob(File.join(dir, 'libnng.so*')).each { |lib| paths << lib }
+        puts "NNG: Searching in NNG_LIB_DIR: #{dir}" if ENV['NNG_DEBUG']
+      end
+
+      # Priority 3: Install-time configuration
+      if @install_config[:nng_lib]
+        paths << @install_config[:nng_lib]
+        puts "NNG: Using library from install config: #{@install_config[:nng_lib]}" if ENV['NNG_DEBUG']
+      elsif @install_config[:nng_dir]
+        nng_dir = @install_config[:nng_dir]
+        # Try common subdirectories
+        %w[lib lib64 lib/x86_64-linux-gnu].each do |subdir|
+          lib_dir = File.join(nng_dir, subdir)
+          Dir.glob(File.join(lib_dir, 'libnng.so*')).each { |lib| paths << lib }
+        end
+        puts "NNG: Searching in install config dir: #{nng_dir}" if ENV['NNG_DEBUG']
+      end
+
+      # Priority 4: Bundled library
+      bundled_lib = File.expand_path('../../ext/nng/libnng.so.1.8.0', __dir__)
+      paths << bundled_lib
+
+      # Priority 5: System default paths
+      paths += [
+        '/usr/local/lib/libnng.so',
+        '/usr/lib/libnng.so',
+        '/usr/lib/x86_64-linux-gnu/libnng.so',
+        '/usr/lib/aarch64-linux-gnu/libnng.so'
+      ]
+
+      paths.uniq
+    end
+
+    @lib_paths = build_lib_paths
     @loaded_lib_path = nil
+
     @lib_paths.each do |path|
       if File.exist?(path)
         begin
           ffi_lib path
           @loaded_lib_path = path
+          puts "NNG: Successfully loaded library from: #{path}" if ENV['NNG_DEBUG']
           break
-        rescue LoadError
+        rescue LoadError => e
+          puts "NNG: Failed to load #{path}: #{e.message}" if ENV['NNG_DEBUG']
           next
         end
       end
     end
 
-    raise LoadError, "Could not find libnng.so in any of: #{@lib_paths.join(', ')}" unless @loaded_lib_path
+    unless @loaded_lib_path
+      error_msg = "Could not find libnng.so in any of the following locations:\n"
+      error_msg += @lib_paths.map { |p| "  - #{p}" }.join("\n")
+      error_msg += "\n\nYou can specify a custom path using:\n"
+      error_msg += "  - Environment variable: export NNG_LIB_PATH=/path/to/libnng.so\n"
+      error_msg += "  - Environment variable: export NNG_LIB_DIR=/path/to/lib\n"
+      error_msg += "  - Gem install option: gem install nng-ruby -- --with-nng-dir=/path/to/nng\n"
+      error_msg += "  - Gem install option: gem install nng-ruby -- --with-nng-lib=/path/to/libnng.so"
+      raise LoadError, error_msg
+    end
 
     def self.loaded_lib_path
       @loaded_lib_path
+    end
+
+    def self.install_config
+      @install_config
     end
 
     # ============================================================================

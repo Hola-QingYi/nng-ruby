@@ -41,9 +41,11 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'rake', '~> 13.0'
   spec.add_development_dependency 'rspec', '~> 3.0'
   spec.add_development_dependency 'yard', '~> 0.9'
+  spec.add_development_dependency 'rake-compiler', '~> 1.0'
 
-  # Extensions (none - we use FFI)
-  # spec.extensions = []
+  # Extension configuration (for capturing install-time options)
+  # We use FFI so no actual compilation, but extconf.rb captures --with-nng-* options
+  spec.extensions = ['ext/nng/extconf.rb']
 
   # Post-install message
   spec.post_install_message = <<~MSG
