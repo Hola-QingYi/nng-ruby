@@ -66,29 +66,41 @@ client.close
 
 ### Request/Reply Protocol
 
+The request/reply pattern ensures exactly one reply for each request:
+
 ```ruby
 require 'nng'
 
-# Server (replier)
+# Server (replier) - Must reply to each request
 rep = NNG::Socket.new(:rep)
 rep.listen("tcp://127.0.0.1:5556")
 
-# Client (requester)
+# Client (requester) - Must wait for reply before sending next request
 req = NNG::Socket.new(:req)
 req.dial("tcp://127.0.0.1:5556")
+sleep 0.1  # Allow connection to establish
 
-# Send request and get reply
+# Request-reply cycle
 req.send("What is the answer?")
-puts rep.recv  # => "What is the answer?"
+question = rep.recv
+puts "Server received: #{question}"
 
 rep.send("42")
-puts req.recv  # => "42"
+answer = req.recv
+puts "Client received: #{answer}"
+
+# Another request-reply cycle
+req.send("What is 2+2?")
+rep.send("4")
+puts req.recv  # => "4"
 
 rep.close
 req.close
 ```
 
 ### Publish/Subscribe Protocol
+
+Pub/Sub allows one publisher to broadcast to multiple subscribers:
 
 ```ruby
 require 'nng'
@@ -97,38 +109,162 @@ require 'nng'
 pub = NNG::Socket.new(:pub)
 pub.listen("tcp://127.0.0.1:5557")
 
-# Subscriber
-sub = NNG::Socket.new(:sub)
-sub.dial("tcp://127.0.0.1:5557")
-sub.set_option("sub:subscribe", "") # Subscribe to all topics
+# Subscriber 1 - Subscribe to all topics
+sub1 = NNG::Socket.new(:sub)
+sub1.dial("tcp://127.0.0.1:5557")
+sub1.set_option("sub:subscribe", "")  # Subscribe to everything
 
-# Publish messages
-pub.send("Hello, subscribers!")
-puts sub.recv  # => "Hello, subscribers!"
+# Subscriber 2 - Subscribe to specific topic
+sub2 = NNG::Socket.new(:sub)
+sub2.dial("tcp://127.0.0.1:5557")
+sub2.set_option("sub:subscribe", "ALERT:")  # Only "ALERT:" messages
+
+sleep 0.1  # Allow subscriptions to propagate
+
+# Publish to all subscribers
+pub.send("ALERT: System update available")
+puts sub1.recv  # => "ALERT: System update available"
+puts sub2.recv  # => "ALERT: System update available"
+
+# Publish general message (only sub1 receives)
+pub.send("INFO: Normal operation")
+puts sub1.recv  # => "INFO: Normal operation"
+# sub2 won't receive this (topic doesn't match)
 
 pub.close
-sub.close
+sub1.close
+sub2.close
 ```
 
 ### Push/Pull Protocol (Pipeline)
 
+Push/Pull creates a load-balanced pipeline for distributing work:
+
 ```ruby
 require 'nng'
+require 'thread'
 
-# Producer
+# Producer (Push)
 push = NNG::Socket.new(:push)
 push.listen("tcp://127.0.0.1:5558")
 
-# Consumer
-pull = NNG::Socket.new(:pull)
-pull.dial("tcp://127.0.0.1:5558")
+# Worker 1 (Pull)
+pull1 = NNG::Socket.new(:pull)
+pull1.dial("tcp://127.0.0.1:5558")
 
-# Send work
-push.send("Task 1")
-puts pull.recv  # => "Task 1"
+# Worker 2 (Pull)
+pull2 = NNG::Socket.new(:pull)
+pull2.dial("tcp://127.0.0.1:5558")
+
+sleep 0.1  # Allow connections
+
+# Start workers in threads
+workers = []
+workers << Thread.new do
+  3.times do
+    task = pull1.recv
+    puts "Worker 1 processing: #{task}"
+  end
+end
+
+workers << Thread.new do
+  3.times do
+    task = pull2.recv
+    puts "Worker 2 processing: #{task}"
+  end
+end
+
+# Distribute tasks (round-robin to workers)
+6.times do |i|
+  push.send("Task #{i+1}")
+  sleep 0.01
+end
+
+# Wait for workers to complete
+workers.each(&:join)
 
 push.close
-pull.close
+pull1.close
+pull2.close
+```
+
+### Bus Protocol (Many-to-Many)
+
+Bus protocol allows all peers to communicate with each other:
+
+```ruby
+require 'nng'
+
+# Create three bus nodes
+node1 = NNG::Socket.new(:bus)
+node1.listen("tcp://127.0.0.1:5559")
+
+node2 = NNG::Socket.new(:bus)
+node2.listen("tcp://127.0.0.1:5560")
+node2.dial("tcp://127.0.0.1:5559")
+
+node3 = NNG::Socket.new(:bus)
+node3.dial("tcp://127.0.0.1:5559")
+node3.dial("tcp://127.0.0.1:5560")
+
+sleep 0.1  # Allow mesh to form
+
+# Any node can send to all others
+node1.send("Message from Node 1")
+puts node2.recv  # => "Message from Node 1"
+puts node3.recv  # => "Message from Node 1"
+
+node2.send("Message from Node 2")
+puts node1.recv  # => "Message from Node 2"
+puts node3.recv  # => "Message from Node 2"
+
+node1.close
+node2.close
+node3.close
+```
+
+### Surveyor/Respondent Protocol
+
+Surveyor sends a survey, and all respondents reply:
+
+```ruby
+require 'nng'
+
+# Surveyor
+surveyor = NNG::Socket.new(:surveyor)
+surveyor.listen("tcp://127.0.0.1:5561")
+surveyor.send_timeout = 1000  # 1 second to collect responses
+
+# Respondents
+resp1 = NNG::Socket.new(:respondent)
+resp1.dial("tcp://127.0.0.1:5561")
+
+resp2 = NNG::Socket.new(:respondent)
+resp2.dial("tcp://127.0.0.1:5561")
+
+sleep 0.1  # Allow connections
+
+# Send survey
+surveyor.send("What is your status?")
+
+# Respondents reply
+question1 = resp1.recv
+resp1.send("Respondent 1: OK")
+
+question2 = resp2.recv
+resp2.send("Respondent 2: OK")
+
+# Collect responses
+begin
+  puts surveyor.recv  # => "Respondent 1: OK" or "Respondent 2: OK"
+  puts surveyor.recv  # => "Respondent 2: OK" or "Respondent 1: OK"
+rescue NNG::TimeoutError
+  puts "Survey complete"
+end
+
+surveyor.close
+resp1.close
+resp2.close
 ```
 
 ## Supported Protocols
@@ -243,41 +379,190 @@ rescue NNG::Error => e
 end
 ```
 
-### Using Messages
+### Using Messages (NNG::Message API)
+
+The Message API provides more control over message headers and bodies:
+
+#### Basic Message Operations
 
 ```ruby
 require 'nng'
 
-# Create a message
+# Create a new message
 msg = NNG::Message.new
+
+# Append data to message body
 msg.append("Hello, ")
 msg.append("World!")
 puts msg.body  # => "Hello, World!"
+puts msg.length  # => 13
 
-# Add header
-msg.header_append("Type: Greeting")
+# Insert data at the beginning
+msg.insert("Say: ")
+puts msg.body  # => "Say: Hello, World!"
+
+# Add header information
+msg.header_append("Content-Type: text/plain")
+puts msg.header  # => "Content-Type: text/plain"
+puts msg.header_length  # => 24
+
+# Clear body or header
+msg.clear  # Clears body
+msg.header_clear  # Clears header
 
 # Duplicate message
 msg2 = msg.dup
 
-# Free message
+# Free messages when done
 msg.free
 msg2.free
 ```
 
-### Socket Options
+#### Sending and Receiving Messages
 
 ```ruby
+require 'nng'
+
+# Server side
+server = NNG::Socket.new(:pair1)
+server.listen("tcp://127.0.0.1:5555")
+
+# Client side
+client = NNG::Socket.new(:pair1)
+client.dial("tcp://127.0.0.1:5555")
+sleep 0.1  # Give time to establish connection
+
+# Send a message with header and body
+msg = NNG::Message.new
+msg.header_append("RequestID: 12345")
+msg.append("Hello from client!")
+
+# Send message using low-level API
+msg_ptr = ::FFI::MemoryPointer.new(:pointer)
+msg_ptr.write_pointer(msg.to_ptr)
+ret = NNG::FFI.nng_sendmsg(client.socket, msg_ptr.read_pointer, 0)
+NNG::FFI.check_error(ret, "Send message")
+# Note: Message is freed automatically after sending
+
+# Receive message
+recv_msg_ptr = ::FFI::MemoryPointer.new(:pointer)
+ret = NNG::FFI.nng_recvmsg(server.socket, recv_msg_ptr, 0)
+NNG::FFI.check_error(ret, "Receive message")
+
+# Wrap received message
+recv_msg = NNG::Message.allocate
+recv_msg.instance_variable_set(:@msg, recv_msg_ptr.read_pointer)
+recv_msg.instance_variable_set(:@msg_ptr, recv_msg_ptr)
+recv_msg.instance_variable_set(:@freed, false)
+
+puts "Header: #{recv_msg.header}"  # => "RequestID: 12345"
+puts "Body: #{recv_msg.body}"      # => "Hello from client!"
+
+recv_msg.free
+server.close
+client.close
+```
+
+#### Simple String-based Send/Receive (Recommended for most use cases)
+
+For simpler use cases, use the high-level Socket#send and Socket#recv methods:
+
+```ruby
+require 'nng'
+
+server = NNG::Socket.new(:pair1)
+server.listen("tcp://127.0.0.1:5555")
+
+client = NNG::Socket.new(:pair1)
+client.dial("tcp://127.0.0.1:5555")
+
+# Simple send/receive (no need to manage Message objects)
+client.send("Hello, Server!")
+data = server.recv
+puts data  # => "Hello, Server!"
+
+server.close
+client.close
+```
+
+### Socket Options
+
+NNG sockets support various options to control behavior:
+
+```ruby
+require 'nng'
+
 socket = NNG::Socket.new(:pub)
 
-# Set options
-socket.set_option("send-buffer", 8192)
-socket.set_option("tcp-nodelay", true)
+# Set buffer sizes
+socket.set_option("send-buffer", 8192)    # Send buffer size in bytes
+socket.set_option("recv-buffer", 8192)    # Receive buffer size in bytes
+
+# Set TCP options
+socket.set_option("tcp-nodelay", true)    # Disable Nagle's algorithm
+socket.set_option("tcp-keepalive", true)  # Enable TCP keepalive
+
+# Set timeouts
+socket.send_timeout = 1000  # 1 second send timeout
+socket.recv_timeout = 5000  # 5 second receive timeout
+
+# Or use set_option_ms
 socket.set_option_ms("send-timeout", 1000)
+socket.set_option_ms("recv-timeout", 5000)
 
 # Get options
 buffer_size = socket.get_option("send-buffer", type: :int)
+puts "Send buffer: #{buffer_size} bytes"
+
 nodelay = socket.get_option("tcp-nodelay", type: :bool)
+puts "TCP NoDelay: #{nodelay}"
+
+send_timeout = socket.get_option("send-timeout", type: :ms)
+puts "Send timeout: #{send_timeout} ms"
+
+# Protocol-specific options
+if socket.socket.id  # For pub/sub
+  # Subscriber can set subscription topics
+  sub = NNG::Socket.new(:sub)
+  sub.set_option("sub:subscribe", "news/")   # Subscribe to "news/*"
+  sub.set_option("sub:subscribe", "alerts/") # Subscribe to "alerts/*"
+  sub.set_option("sub:unsubscribe", "news/") # Unsubscribe from "news/*"
+end
+
+socket.close
+```
+
+### Transport-Specific URLs
+
+Different transports have different URL formats:
+
+```ruby
+require 'nng'
+
+socket = NNG::Socket.new(:pair1)
+
+# TCP transport
+socket.listen("tcp://0.0.0.0:5555")           # Listen on all interfaces
+socket.dial("tcp://192.168.1.100:5555")       # Connect to specific IP
+socket.dial("tcp://localhost:5555")           # Connect to localhost
+
+# IPC transport (Unix domain sockets)
+socket.listen("ipc:///tmp/test.sock")         # Unix socket
+socket.dial("ipc:///tmp/test.sock")
+
+# Inproc transport (in-process, same memory space)
+socket.listen("inproc://my-channel")
+socket.dial("inproc://my-channel")
+
+# WebSocket transport
+socket.listen("ws://0.0.0.0:8080/path")
+socket.dial("ws://localhost:8080/path")
+
+# TLS transport
+socket.listen("tls+tcp://0.0.0.0:5556")
+socket.dial("tls+tcp://server.example.com:5556")
+
+socket.close
 ```
 
 ## Examples
@@ -368,30 +653,122 @@ msg = NNG::Message.new(size: 0)
 
 ### Error Handling
 
+NNG-ruby provides specific exception classes for different error conditions:
+
 ```ruby
+require 'nng'
+
+socket = NNG::Socket.new(:req)
+
 begin
-  socket.send("data")
+  # Set a short timeout for demonstration
+  socket.recv_timeout = 100  # 100ms
+
+  # Try to receive (will timeout if no data)
+  socket.dial("tcp://127.0.0.1:9999")
+  data = socket.recv
+
 rescue NNG::TimeoutError => e
-  puts "Timeout: #{e.message}"
+  puts "Operation timed out: #{e.message}"
+  # Retry logic here
+
 rescue NNG::ConnectionRefused => e
-  puts "Connection refused: #{e.message}"
+  puts "Cannot connect to server: #{e.message}"
+  # Server might be down
+
+rescue NNG::AddressInUse => e
+  puts "Port already in use: #{e.message}"
+  # Try a different port
+
+rescue NNG::StateError => e
+  puts "Invalid state for operation: #{e.message}"
+  # Check socket state
+
 rescue NNG::Error => e
-  puts "NNG error: #{e.message}"
+  puts "NNG error (#{e.class}): #{e.message}"
+  # Generic error handling
+
+ensure
+  socket.close
 end
 ```
 
-Available error classes:
-- `NNG::Error` - Base error
-- `NNG::TimeoutError`
-- `NNG::ConnectionRefused`
-- `NNG::ConnectionAborted`
-- `NNG::ConnectionReset`
-- `NNG::Closed`
-- `NNG::AddressInUse`
-- `NNG::NoMemory`
-- `NNG::MessageSize`
-- `NNG::ProtocolError`
-- `NNG::StateError`
+#### Complete Error Hierarchy
+
+```ruby
+NNG::Error                    # Base class for all NNG errors
+├── NNG::TimeoutError         # Operation timed out
+├── NNG::ConnectionRefused    # Connection refused by peer
+├── NNG::ConnectionAborted    # Connection aborted
+├── NNG::ConnectionReset      # Connection reset by peer
+├── NNG::Closed               # Socket/resource already closed
+├── NNG::AddressInUse         # Address already in use
+├── NNG::NoMemory             # Out of memory
+├── NNG::MessageSize          # Message size invalid
+├── NNG::ProtocolError        # Protocol error
+└── NNG::StateError           # Invalid state for operation
+```
+
+#### Practical Error Handling Examples
+
+**1. Retry on Timeout:**
+
+```ruby
+def send_with_retry(socket, data, max_retries: 3)
+  retries = 0
+  begin
+    socket.send(data)
+  rescue NNG::TimeoutError
+    retries += 1
+    if retries < max_retries
+      puts "Timeout, retrying (#{retries}/#{max_retries})..."
+      sleep 0.1
+      retry
+    else
+      raise "Failed after #{max_retries} retries"
+    end
+  end
+end
+```
+
+**2. Graceful Degradation:**
+
+```ruby
+def connect_with_fallback(socket, primary_url, fallback_url)
+  begin
+    socket.dial(primary_url)
+    puts "Connected to primary server"
+  rescue NNG::ConnectionRefused, NNG::TimeoutError
+    puts "Primary server unavailable, trying fallback..."
+    socket.dial(fallback_url)
+    puts "Connected to fallback server"
+  end
+end
+```
+
+**3. Non-blocking Receive with Error Handling:**
+
+```ruby
+socket = NNG::Socket.new(:pull)
+socket.listen("tcp://127.0.0.1:5555")
+
+loop do
+  begin
+    # Non-blocking receive
+    data = socket.recv(flags: NNG::FFI::NNG_FLAG_NONBLOCK)
+    puts "Received: #{data}"
+    process_data(data)
+  rescue NNG::Error => e
+    if e.message.include?("try again")
+      # No data available, do other work
+      sleep 0.01
+    else
+      puts "Error: #{e.message}"
+      break
+    end
+  end
+end
+```
 
 ## Requirements
 
