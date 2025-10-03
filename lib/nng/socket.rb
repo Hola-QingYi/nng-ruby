@@ -108,7 +108,10 @@ module NNG
     def get_option(name, type: :int)
       check_closed
 
-      value_ptr = ::FFI::MemoryPointer.new(type)
+      # :ms is actually :int32 (nng_duration)
+      ptr_type = type == :ms ? :int32 : type
+      value_ptr = ::FFI::MemoryPointer.new(ptr_type)
+
       ret = case type
             when :bool
               FFI.nng_getopt_bool(@socket, name, value_ptr)
@@ -134,7 +137,7 @@ module NNG
         FFI.nng_strfree(str_ptr)
         result
       else
-        value_ptr.read(type)
+        value_ptr.read(ptr_type)
       end
     end
 

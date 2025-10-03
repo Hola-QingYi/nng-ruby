@@ -569,16 +569,28 @@ socket.close
 
 See the `examples/` directory for complete working examples:
 
+### Protocol Examples
 - `examples/pair.rb` - Pair protocol
 - `examples/reqrep.rb` - Request/Reply protocol
 - `examples/pubsub.rb` - Publish/Subscribe protocol
 
+### Protocol Buffers Integration
+- `examples/protobuf_demo.rb` - NNG + Protobuf comprehensive demo
+- `examples/protobuf_simple.rb` - Simple Protobuf example with process communication
+- `examples/proto/message.proto` - Protobuf message definitions
+
 Run examples:
 
 ```bash
+# Protocol examples
 ruby examples/pair.rb
 ruby examples/reqrep.rb
 ruby examples/pubsub.rb
+
+# Protobuf examples (requires google-protobuf gem)
+gem install google-protobuf
+ruby examples/protobuf_demo.rb
+ruby examples/protobuf_simple.rb
 ```
 
 ## API Documentation

@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+// RPC 请求消息
+message RpcRequest {
+  int32 func_code = 1;      // 功能码
+  bytes data = 2;           // 请求数据
+  int64 timestamp = 3;      // 时间戳
+  string request_id = 4;    // 请求 ID
+}
+
+// RPC 响应消息
+message RpcResponse {
+  int32 status = 1;         // 状态码 (0=成功)
+  bytes data = 2;           // 响应数据
+  string error_msg = 3;     // 错误消息
+  string request_id = 4;    // 对应的请求 ID
+}
+
+// 用户信息
+message User {
+  int32 id = 1;
+  string name = 2;
+  string email = 3;
+  repeated string tags = 4;
+}
+
+// 联系人信息
+message Contact {
+  string wxid = 1;          // 微信 ID
+  string name = 2;          // 昵称
+  string remark = 3;        // 备注
+  int32 type = 4;           // 类型
+}
+
+// 联系人列表
+message ContactList {
+  repeated Contact contacts = 1;
+}
+
+// 文本消息
+message TextMessage {
+  string receiver = 1;      // 接收者
+  string content = 2;       // 内容
+  string aters = 3;         // @的人
+}
