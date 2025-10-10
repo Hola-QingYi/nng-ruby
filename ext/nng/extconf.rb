@@ -67,5 +67,14 @@ if config.any?
   puts "Custom configuration:"
   config.each { |k, v| puts "  #{k}: #{v}" }
 else
-  puts "Using default bundled libnng.so.1.8.0"
+  require 'rbconfig'
+  platform = case RbConfig::CONFIG['host_os']
+             when /mswin|msys|mingw|cygwin|bccwin|wince|emc/
+               'nng.dll (Windows)'
+             when /darwin|mac os/
+               'libnng.dylib (macOS)'
+             else
+               'libnng.so.1.11.0 (Linux)'
+             end
+  puts "Using default bundled #{platform}"
 end

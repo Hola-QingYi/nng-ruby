@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'ffi'
+require 'rbconfig'
 
 module NNG
   # FFI bindings for libnng
@@ -15,14 +16,27 @@ module NNG
       @install_config = NNG::InstallConfig::CONFIG rescue {}
     end
 
+    # Detect platform and return library file patterns
+    def self.platform_info
+      case RbConfig::CONFIG['host_os']
+      when /mswin|msys|mingw|cygwin|bccwin|wince|emc/
+        { os: :windows, lib_pattern: 'nng*.dll', lib_name: 'nng.dll' }
+      when /darwin|mac os/
+        { os: :macos, lib_pattern: 'libnng*.dylib', lib_name: 'libnng.dylib' }
+      else
+        { os: :linux, lib_pattern: 'libnng.so*', lib_name: 'libnng.so' }
+      end
+    end
+
     # Build library search paths with priority order:
     # 1. ENV['NNG_LIB_PATH'] - Direct path to library file
-    # 2. ENV['NNG_LIB_DIR'] - Directory containing libnng.so*
+    # 2. ENV['NNG_LIB_DIR'] - Directory containing library
     # 3. Install config (from gem install --with-nng-*)
     # 4. Bundled library
     # 5. System default paths
     def self.build_lib_paths
       paths = []
+      platform = platform_info
 
       # Priority 1: Direct library path from environment
       if ENV['NNG_LIB_PATH'] && !ENV['NNG_LIB_PATH'].empty?
@@ -33,8 +47,8 @@ module NNG
       # Priority 2: Library directory from environment
       if ENV['NNG_LIB_DIR'] && !ENV['NNG_LIB_DIR'].empty?
         dir = ENV['NNG_LIB_DIR']
-        # Search for libnng.so* in the directory
-        Dir.glob(File.join(dir, 'libnng.so*')).each { |lib| paths << lib }
+        # Search for platform-specific library files in the directory
+        Dir.glob(File.join(dir, platform[:lib_pattern])).each { |lib| paths << lib }
         puts "NNG: Searching in NNG_LIB_DIR: #{dir}" if ENV['NNG_DEBUG']
       end
 
@@ -44,25 +58,67 @@ module NNG
         puts "NNG: Using library from install config: #{@install_config[:nng_lib]}" if ENV['NNG_DEBUG']
       elsif @install_config[:nng_dir]
         nng_dir = @install_config[:nng_dir]
-        # Try common subdirectories
-        %w[lib lib64 lib/x86_64-linux-gnu].each do |subdir|
+        # Try common subdirectories based on platform
+        subdirs = case platform[:os]
+                  when :windows
+                    %w[bin lib]
+                  when :macos
+                    %w[lib]
+                  else
+                    %w[lib lib64 lib/x86_64-linux-gnu]
+                  end
+
+        subdirs.each do |subdir|
           lib_dir = File.join(nng_dir, subdir)
-          Dir.glob(File.join(lib_dir, 'libnng.so*')).each { |lib| paths << lib }
+          Dir.glob(File.join(lib_dir, platform[:lib_pattern])).each { |lib| paths << lib }
         end
         puts "NNG: Searching in install config dir: #{nng_dir}" if ENV['NNG_DEBUG']
       end
 
-      # Priority 4: Bundled library
-      bundled_lib = File.expand_path('../../ext/nng/libnng.so.1.8.0', __dir__)
-      paths << bundled_lib
+      # Priority 4: Bundled library (platform-specific)
+      bundled_libs = case platform[:os]
+                     when :windows
+                       [
+                         File.expand_path('../../ext/nng/nng.dll', __dir__),
+                         File.expand_path('../../ext/nng/libnng.dll', __dir__)
+                       ]
+                     when :macos
+                       [
+                         File.expand_path('../../ext/nng/libnng.1.11.0.dylib', __dir__),
+                         File.expand_path('../../ext/nng/libnng.dylib', __dir__)
+                       ]
+                     else
+                       [
+                         File.expand_path('../../ext/nng/libnng.so.1.11.0', __dir__),
+                         File.expand_path('../../ext/nng/libnng.so', __dir__)
+                       ]
+                     end
+      paths += bundled_libs
 
-      # Priority 5: System default paths
-      paths += [
-        '/usr/local/lib/libnng.so',
-        '/usr/lib/libnng.so',
-        '/usr/lib/x86_64-linux-gnu/libnng.so',
-        '/usr/lib/aarch64-linux-gnu/libnng.so'
-      ]
+      # Priority 5: System default paths (platform-specific)
+      case platform[:os]
+      when :windows
+        # Windows: check common DLL locations
+        paths += [
+          File.join(ENV['WINDIR'] || 'C:/Windows', 'System32/nng.dll'),
+          File.join(ENV['ProgramFiles'] || 'C:/Program Files', 'nng/bin/nng.dll')
+        ]
+      when :macos
+        # macOS: check common library locations
+        paths += [
+          '/usr/local/lib/libnng.dylib',
+          '/opt/homebrew/lib/libnng.dylib',
+          '/usr/lib/libnng.dylib'
+        ]
+      else
+        # Linux: check common library locations
+        paths += [
+          '/usr/local/lib/libnng.so',
+          '/usr/lib/libnng.so',
+          '/usr/lib/x86_64-linux-gnu/libnng.so',
+          '/usr/lib/aarch64-linux-gnu/libnng.so'
+        ]
+      end
 
       paths.uniq
     end
@@ -85,13 +141,15 @@ module NNG
     end
 
     unless @loaded_lib_path
-      error_msg = "Could not find libnng.so in any of the following locations:\n"
+      platform = platform_info
+      lib_name = platform[:lib_name]
+      error_msg = "Could not find NNG library (#{lib_name}) in any of the following locations:\n"
       error_msg += @lib_paths.map { |p| "  - #{p}" }.join("\n")
       error_msg += "\n\nYou can specify a custom path using:\n"
-      error_msg += "  - Environment variable: export NNG_LIB_PATH=/path/to/libnng.so\n"
+      error_msg += "  - Environment variable: export NNG_LIB_PATH=/path/to/#{lib_name}\n"
       error_msg += "  - Environment variable: export NNG_LIB_DIR=/path/to/lib\n"
       error_msg += "  - Gem install option: gem install nng-ruby -- --with-nng-dir=/path/to/nng\n"
-      error_msg += "  - Gem install option: gem install nng-ruby -- --with-nng-lib=/path/to/libnng.so"
+      error_msg += "  - Gem install option: gem install nng-ruby -- --with-nng-lib=/path/to/#{lib_name}"
       raise LoadError, error_msg
     end
 
@@ -107,6 +165,8 @@ module NNG
     # Constants
     # ============================================================================
 
+    # NOTE: These are compile-time version constants for reference.
+    # Use nng_version() to get the actual runtime library version.
     NNG_MAJOR_VERSION = 1
     NNG_MINOR_VERSION = 8
     NNG_PATCH_VERSION = 0
@@ -249,6 +309,9 @@ module NNG
     # ============================================================================
     # Core functions
     # ============================================================================
+
+    # Library version
+    attach_function :nng_version, [], :string
 
     # Library finalization
     attach_function :nng_fini, [], :void

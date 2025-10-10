@@ -36,9 +36,9 @@ module NNG
   end
 
   # NNG library version (from C library)
-  # @return [String] version string from libnng
+  # @return [String] version string from libnng runtime
   def self.lib_version
-    "#{FFI::NNG_MAJOR_VERSION}.#{FFI::NNG_MINOR_VERSION}.#{FFI::NNG_PATCH_VERSION}"
+    FFI.nng_version
   end
 
   # Cleanup NNG library (optional, called automatically at exit)

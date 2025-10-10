@@ -7,12 +7,13 @@ Ruby bindings for [NNG (nanomsg-next-generation)](https://nng.nanomsg.org/), a l
 
 ## Features
 
-- ✅ Complete FFI bindings for NNG 1.8.0 (300+ functions)
+- ✅ Complete FFI bindings for NNG 1.11.0 (300+ functions)
+- ✅ **Cross-platform support**: Windows, macOS, and Linux
 - ✅ All scalability protocols: Pair, Push/Pull, Pub/Sub, Req/Rep, Surveyor/Respondent, Bus
 - ✅ All transports: TCP, IPC, Inproc, WebSocket, TLS
 - ✅ High-level Ruby API with automatic resource management
 - ✅ Message-based and byte-based communication
-- ✅ Bundled libnng.so.1.8.0 shared library (no external dependencies)
+- ✅ Bundled NNG 1.11.0 libraries (nng.dll for Windows, libnng.so for Linux)
 - ✅ Thread-safe
 - ✅ Full async I/O support
 - ✅ Automated testing and publishing via GitHub Actions
@@ -288,7 +289,7 @@ resp2.close
 
 ### Custom Library Configuration
 
-By default, nng-ruby uses the bundled libnng.so.1.8.0 library. However, you can specify a custom NNG library in several ways:
+By default, nng-ruby uses the bundled NNG 1.11.0 library (platform-specific: nng.dll on Windows, libnng.so.1.11.0 on Linux). However, you can specify a custom NNG library in several ways:
 
 #### Option 1: At install time
 
@@ -338,7 +339,7 @@ The library is loaded in this priority order:
 1. **Environment variable** `NNG_LIB_PATH` (highest priority)
 2. **Environment variable** `NNG_LIB_DIR`
 3. **Install-time configuration** (gem install --with-nng-*)
-4. **Bundled library** (ext/nng/libnng.so.1.8.0)
+4. **Bundled library** (ext/nng/nng.dll or ext/nng/libnng.so.1.11.0)
 5. **System paths** (/usr/local/lib, /usr/lib, etc.)
 
 #### Debugging
@@ -1127,7 +1128,7 @@ end
 - Ruby 2.5 or later
 - FFI gem
 
-The NNG shared library (libnng.so.1.8.0) is bundled with the gem, so no external installation is required.
+The NNG shared library (v1.11.0) is bundled with the gem for all platforms, so no external installation is required.
 
 ## Development
 
@@ -1192,9 +1193,9 @@ MIT License - see LICENSE file for details.
 
 ### 0.1.0 (2025-10-03)
 - Initial release
-- Complete NNG 1.8.0 API bindings
+- Complete NNG API bindings
 - All protocols and transports supported
-- Bundled libnng.so.1.8.0
+- Bundled NNG library
 - High-level Ruby API
 - Message support
 - Examples and documentation
